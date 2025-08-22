@@ -171,7 +171,6 @@ class AlbumRetrieval {
         
         // Stop if we found an old album (since they're sorted by date)
         if (foundOldAlbum) {
-          console.log(`   ⚡ Early termination for ${artist.name} - found albums older than 10 days`);
           break;
         }
         
@@ -235,6 +234,7 @@ class AlbumRetrieval {
           await this.delay(this.rateLimitDelay);
         }
         
+        console.log(`   Fetching albums for ${artist.name}...`);
         const albums = await this.fetchArtistAlbums(artist);
         
         if (albums.length > 0) {

@@ -1,5 +1,8 @@
 # Claude Code Instructions
 
+## Rules
+Do not commit or push changes unless explicitly instructed.
+
 ## Project Overview
 Spotify Personalized Release Notifications - A command-line tool that checks for new album and EP releases from artists you follow or have liked on Spotify.
 
