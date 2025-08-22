@@ -8,7 +8,7 @@ class AlbumRetrieval {
     this.spotifyApi = spotifyApi;
     this.rateLimitDelay = 100; // Base delay between requests (ms)
     this.batchSize = 10; // Number of artists to process concurrently
-    this.useSearchOptimization = options.useSearchOptimization !== false; // Enable by default
+    this.useSearchOptimization = options.useSearchOptimization === true; // Disable by default due to API issues
   }
 
   /**
