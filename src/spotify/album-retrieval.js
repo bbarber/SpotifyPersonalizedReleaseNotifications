@@ -3,12 +3,15 @@
  * Fetches albums and EPs for a list of artists from Spotify
  */
 
+const cliProgress = require('cli-progress');
+
 class AlbumRetrieval {
   constructor(spotifyApi, options = {}) {
     this.spotifyApi = spotifyApi;
     this.rateLimitDelay = 100; // Base delay between requests (ms)
     this.batchSize = 10; // Number of artists to process concurrently
     this.useSearchOptimization = options.useSearchOptimization === true; // Disable by default due to API issues
+    this.progressBar = null; // Progress bar instance
   }
 
   /**
@@ -99,7 +102,6 @@ class AlbumRetrieval {
         } catch (queryError) {
           // If tag:new query fails, try the fallback
           if (query.includes('tag:new')) {
-            console.log(`   ⚠️  tag:new search failed for ${artist.name}, trying fallback search`);
             continue;
           }
           throw queryError; // If fallback search fails, throw error
@@ -109,9 +111,7 @@ class AlbumRetrieval {
       return []; // No results found
 
     } catch (error) {
-      // Log the actual error for debugging
-      console.log(`   ⚠️  Search failed for ${artist.name}: ${error.message || error.statusCode || 'Unknown error'}`);
-      console.log(`   🔄 Falling back to artist albums endpoint`);
+      // Silently fall back to artist albums endpoint - progress bar will show overall progress
       return this.fetchArtistAlbumsWithEarlyTermination(artist);
     }
   }
@@ -190,8 +190,7 @@ class AlbumRetrieval {
         const retryAfter = error.headers['retry-after'] || 1;
         throw new Error(`Rate limited. Retry after ${retryAfter} seconds`);
       } else if (error.statusCode === 404) {
-        // Artist not found - log but don't fail
-        console.log(`   ⚠️  Artist not found: ${artist.name} (${artist.id})`);
+        // Artist not found - return empty result silently
         return [];
       } else if (error.statusCode >= 500) {
         throw new Error(`Spotify API error for ${artist.name}: ${error.message}`);
@@ -221,8 +220,6 @@ class AlbumRetrieval {
    * @returns {Promise<Array>} Array of albums from all artists in batch
    */
   async processBatch(artistBatch, batchNumber) {
-    console.log(`   Processing batch ${batchNumber}: ${artistBatch.length} artists`);
-    
     const batchResults = [];
     
     for (let i = 0; i < artistBatch.length; i++) {
@@ -234,7 +231,6 @@ class AlbumRetrieval {
           await this.delay(this.rateLimitDelay);
         }
         
-        console.log(`   Fetching albums for ${artist.name}...`);
         const albums = await this.fetchArtistAlbums(artist);
         
         if (albums.length > 0) {
@@ -243,8 +239,6 @@ class AlbumRetrieval {
         
       } catch (error) {
         if (error.message.includes('Rate limited')) {
-          console.log(`   ⏳ Rate limited on ${artist.name}, waiting and retrying...`);
-          
           // Extract wait time or use default
           const waitTime = parseInt(error.message.match(/\d+/)?.[0] || '60');
           await this.delay(waitTime * 1000);
@@ -256,15 +250,12 @@ class AlbumRetrieval {
               batchResults.push(...albums);
             }
           } catch (retryError) {
-            console.log(`   ❌ Failed to fetch albums for ${artist.name} after retry: ${retryError.message}`);
+            // Silent retry failure - progress bar will show overall progress
           }
-        } else {
-          console.log(`   ❌ Error fetching albums for ${artist.name}: ${error.message}`);
         }
       }
     }
     
-    console.log(`   Batch ${batchNumber} complete: ${batchResults.length} albums found`);
     return batchResults;
   }
 
@@ -276,22 +267,42 @@ class AlbumRetrieval {
   async fetchAllArtistAlbums(artists) {
     console.log('\n--- Retrieving Albums for All Artists ---');
     console.log(`📥 Fetching albums for ${artists.length} artists...`);
-    console.log(`   Using batch size: ${this.batchSize}, delay: ${this.rateLimitDelay}ms`);
+    console.log(`   Using batch size: ${this.batchSize}, delay: ${this.rateLimitDelay}ms\n`);
 
     const allAlbums = [];
     const totalBatches = Math.ceil(artists.length / this.batchSize);
     
+    // Initialize progress bar
+    this.progressBar = new cliProgress.SingleBar({
+      format: '🎵 Progress |{bar}| {percentage}% | {value}/{total} artists | ETA: {eta}s | {status}',
+      barCompleteChar: '\u2588',
+      barIncompleteChar: '\u2591',
+      hideCursor: true,
+      barsize: 30,
+      stopOnComplete: true,
+      clearOnComplete: false
+    });
+
+    this.progressBar.start(artists.length, 0, { status: 'Starting...' });
+    
     try {
+      let processedArtists = 0;
+      
       for (let i = 0; i < artists.length; i += this.batchSize) {
         const batchNumber = Math.floor(i / this.batchSize) + 1;
         const artistBatch = artists.slice(i, i + this.batchSize);
         
-        console.log(`\n📦 Batch ${batchNumber}/${totalBatches}:`);
+        this.progressBar.update(processedArtists, { 
+          status: `Batch ${batchNumber}/${totalBatches}` 
+        });
         
         const batchAlbums = await this.processBatch(artistBatch, batchNumber);
         allAlbums.push(...batchAlbums);
         
-        console.log(`   Total albums so far: ${allAlbums.length}`);
+        processedArtists += artistBatch.length;
+        this.progressBar.update(processedArtists, { 
+          status: `${allAlbums.length} albums found` 
+        });
         
         // Larger delay between batches to be extra respectful
         if (batchNumber < totalBatches) {
@@ -299,11 +310,19 @@ class AlbumRetrieval {
         }
       }
 
+      this.progressBar.update(artists.length, { 
+        status: `Complete! ${allAlbums.length} total albums` 
+      });
+      this.progressBar.stop();
+      
       console.log(`\n✅ Retrieved ${allAlbums.length} total albums from ${artists.length} artists`);
       return allAlbums;
 
     } catch (error) {
-      console.error('❌ Error during album retrieval:', error.message);
+      if (this.progressBar) {
+        this.progressBar.stop();
+      }
+      console.error('\n❌ Error during album retrieval:', error.message);
       
       // Return partial results if we got some data
       if (allAlbums.length > 0) {
