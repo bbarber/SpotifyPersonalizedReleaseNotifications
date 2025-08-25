@@ -203,9 +203,9 @@ async function main() {
     console.log(`   Average tracks per release: ${albumStats.averageTracks}`);
     console.log(`   Artists with releases: ${albumStats.uniqueArtists}/${allArtists.length}`);
 
-    // Show recent activity (last 2 years)
-    const recentAlbums = albumRetrieval.getRecentAlbums(allAlbums, 2);
-    console.log(`\n📅 Recent Activity (last 2 years): ${recentAlbums.length} releases`);
+    // Show recent activity (last 1 years)
+    const recentAlbums = albumRetrieval.getRecentAlbums(allAlbums, 1);
+    console.log(`\n📅 Recent Activity: ${recentAlbums.length} releases`);
     
     if (recentAlbums.length > 0) {
       // Show top years
@@ -230,14 +230,25 @@ async function main() {
         .slice(0, 5);
         
       console.log('\n🆕 Sample recent releases:');
-      sampleRecent.forEach(album => {
+      // Print table header
+      console.log('\n   | Type | Artist             | Album / Single Title | Release Date | Tracks |');
+      console.log('   |:----:|--------------------|----------------------|--------------|:------:|');
+
+      // Sort and display sample recent releases in the table
+      sampleRecent.sort((a, b) => {
+        // Keep albums before singles
+        if (a.album_type === b.album_type) return 0;
+        return a.album_type === 'album' ? -1 : 1;
+      }).forEach(album => {
         const type = album.album_type === 'album' ? '💿' : '🎵';
-        console.log(`   ${type} ${album.artist_name} - ${album.name} (${album.release_date.substring(0, 4)}, ${album.total_tracks} tracks)`);
+        const artist = album.artist_name.padEnd(18).substring(0, 18);
+        const title = album.name.padEnd(20).substring(0, 20);
+        const date = album.release_date;
+        const tracks = String(album.total_tracks).padStart(2);
+        
+        console.log(`   | ${type}   | ${artist} | ${title} | ${date}   | ${tracks}     |`);
       });
     }
-
-    console.log('\nNext: Filter for albums/EPs and recent releases...');
-    
   } catch (error) {
     console.error('❌ Authentication failed:', error.message);
     process.exit(1);
