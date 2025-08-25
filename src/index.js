@@ -12,6 +12,9 @@ const LikedArtists = require('./spotify/liked-artists');
 const SavedAlbumsArtists = require('./spotify/saved-albums-artists');
 const ArtistManager = require('./utils/artist-manager');
 const AlbumRetrieval = require('./spotify/album-retrieval');
+const PlaylistManager = require('./utils/playlist-manager');
+const ReleaseFilter = require('./utils/release-filter');
+const InteractiveSelector = require('./utils/interactive-selector');
 
 async function main() {
   console.log('🎵 Spotify Release Notifications');
@@ -249,6 +252,78 @@ async function main() {
         console.log(`   | ${type}   | ${artist} | ${title} | ${date}   | ${tracks}     |`);
       });
     }
+
+    // Interactive playlist creation
+    console.log('\n--- Interactive Playlist Creation ---');
+    try {
+      // Filter to recent albums and EPs only
+      const recentReleases = ReleaseFilter.filterReleases(allAlbums, { daysBack: 10 });
+      const albumsAndEPs = ReleaseFilter.filterAlbumsAndEPs(recentReleases);
+      
+      if (albumsAndEPs.length === 0) {
+        console.log('📭 No recent albums or EPs found in the last 10 days.');
+        console.log('   Nothing available for playlist creation.');
+      } else {
+        console.log(`🔍 Found ${albumsAndEPs.length} recent albums/EPs for selection`);
+        
+        // Interactive release selection
+        const interactiveSelector = new InteractiveSelector();
+        const selectedReleases = await interactiveSelector.selectReleases(albumsAndEPs);
+        
+        if (selectedReleases.length === 0) {
+          console.log('📝 No releases selected. Playlist creation cancelled.');
+        } else {
+          // Get tracks from selected releases
+          console.log(`\n🎵 Extracting tracks from ${selectedReleases.length} selected release(s)...`);
+          const selectedTracks = await ReleaseFilter.extractAllTracksFromReleases(
+            authResult.spotifyApi, 
+            selectedReleases
+          );
+          
+          const uniqueTracks = ReleaseFilter.removeDuplicateTracks(selectedTracks);
+          console.log(`📀 Found ${uniqueTracks.length} total tracks`);
+          
+          // Suggest playlist name
+          const suggestedName = interactiveSelector.suggestPlaylistName(selectedReleases);
+          const playlistName = await interactiveSelector.confirmPlaylistName(suggestedName);
+          
+          // Final confirmation
+          const confirmed = await interactiveSelector.finalConfirmation(playlistName, selectedReleases);
+          
+          if (confirmed) {
+            // Create the playlist
+            console.log('\n🔄 Creating playlist...');
+            const playlistManager = new PlaylistManager(authResult.spotifyApi);
+            const playlistResult = await playlistManager.createCustomPlaylist(playlistName, uniqueTracks);
+            
+            // Display results
+            if (playlistResult.playlist) {
+              console.log(`\n✅ ${playlistResult.message}`);
+              console.log(`📋 Playlist: "${playlistResult.playlist.name}"`);
+              console.log(`🔗 URL: ${playlistResult.playlist.external_urls.spotify}`);
+              console.log(`➕ Tracks added: ${playlistResult.tracksAdded}`);
+              console.log(`📊 Total tracks in playlist: ${playlistResult.totalTracksInPlaylist}`);
+            } else {
+              console.log(`\n📝 ${playlistResult.message}`);
+            }
+          } else {
+            console.log('\n❌ Playlist creation cancelled.');
+          }
+        }
+      }
+
+    } catch (playlistError) {
+      console.error('\n❌ Playlist creation failed:', playlistError.message);
+      
+      // Check if it's a permissions issue
+      if (playlistError.message.includes('insufficient permissions') || 
+          playlistError.message.includes('scope') ||
+          playlistError.message.includes('403')) {
+        console.log('\n💡 This might be a permissions issue.');
+        console.log('   Please re-authenticate to grant playlist creation permissions.');
+      }
+    }
+
   } catch (error) {
     console.error('❌ Authentication failed:', error.message);
     process.exit(1);

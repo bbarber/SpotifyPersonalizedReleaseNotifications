@@ -105,11 +105,138 @@ const daysSinceRelease = (releaseDateString) => {
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 };
 
+/**
+ * Filter albums to only include albums and EPs (exclude singles)
+ * @param {Array} albums - Array of Spotify album objects
+ * @returns {Array} - Filtered albums containing only albums and EPs
+ */
+const filterAlbumsAndEPs = (albums) => {
+  return albums.filter(album => isAlbumOrEP(album));
+};
+
+/**
+ * Extract all tracks from a release using the Spotify API
+ * @param {Object} spotifyApi - Spotify API instance
+ * @param {Object} release - Album/EP object
+ * @returns {Promise<Array>} - Array of track objects with id, uri, name, and album info
+ */
+const extractAllTracks = async (spotifyApi, release) => {
+  try {
+    const tracks = [];
+    let offset = 0;
+    const limit = 50;
+    let hasMore = true;
+
+    while (hasMore) {
+      const response = await spotifyApi.getAlbumTracks(release.id, { offset, limit });
+      const albumTracks = response.body.items;
+
+      albumTracks.forEach(track => {
+        if (track.id && track.uri) {
+          tracks.push({
+            id: track.id,
+            uri: track.uri,
+            name: track.name,
+            track_number: track.track_number,
+            duration_ms: track.duration_ms,
+            explicit: track.explicit,
+            preview_url: track.preview_url,
+            album: {
+              id: release.id,
+              name: release.name,
+              release_date: release.release_date,
+              album_type: release.album_type,
+              artists: release.artists
+            },
+            artists: track.artists
+          });
+        }
+      });
+
+      hasMore = albumTracks.length === limit;
+      offset += limit;
+    }
+
+    return tracks;
+
+  } catch (error) {
+    console.error(`Failed to extract tracks from ${release.name}: ${error.message}`);
+    return [];
+  }
+};
+
+/**
+ * Extract all tracks from multiple releases
+ * @param {Object} spotifyApi - Spotify API instance
+ * @param {Array} releases - Array of album/EP objects
+ * @returns {Promise<Array>} - Array of all tracks from all releases
+ */
+const extractAllTracksFromReleases = async (spotifyApi, releases) => {
+  const allTracks = [];
+  
+  for (const release of releases) {
+    const tracks = await extractAllTracks(spotifyApi, release);
+    allTracks.push(...tracks);
+    
+    // Small delay to respect rate limits
+    if (releases.indexOf(release) < releases.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+
+  return allTracks;
+};
+
+/**
+ * Remove duplicate tracks by track ID
+ * @param {Array} tracks - Array of track objects
+ * @returns {Array} - Deduplicated array of tracks
+ */
+const removeDuplicateTracks = (tracks) => {
+  const seen = new Set();
+  return tracks.filter(track => {
+    if (seen.has(track.id)) {
+      return false;
+    }
+    seen.add(track.id);
+    return true;
+  });
+};
+
+/**
+ * Get playlist-ready tracks from releases (filtered, deduplicated, with all track data)
+ * @param {Object} spotifyApi - Spotify API instance
+ * @param {Array} albums - Array of album objects from album retrieval
+ * @param {Object} options - Options for filtering
+ * @param {number} options.daysBack - Number of days to look back (default: 10)
+ * @returns {Promise<Array>} - Array of track objects ready for playlist creation
+ */
+const getPlaylistReadyTracks = async (spotifyApi, albums, options = {}) => {
+  // Filter to albums and EPs only
+  const albumsAndEPs = filterAlbumsAndEPs(albums);
+  
+  // Filter for recent releases
+  const recentReleases = filterReleases(albumsAndEPs, options);
+  
+  // Extract all tracks from these releases
+  const allTracks = await extractAllTracksFromReleases(spotifyApi, recentReleases);
+  
+  // Remove duplicates
+  const uniqueTracks = removeDuplicateTracks(allTracks);
+  
+  return uniqueTracks;
+};
+
 module.exports = {
   isAlbumOrEP,
   parseReleaseDate,
   isRecentRelease,
   sortByReleaseDate,
   filterReleases,
-  daysSinceRelease
+  daysSinceRelease,
+  filterAlbumsAndEPs,
+  extractAllTracks,
+  extractAllTracksFromReleases,
+  removeDuplicateTracks,
+  getPlaylistReadyTracks
 };

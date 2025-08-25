@@ -36,8 +36,10 @@ class SpotifyAuth {
 
       // Required scopes
       const scopes = [
-        'user-follow-read',    // Access to followed artists
-        'user-library-read'    // Access to saved tracks
+        'user-follow-read',       // Access to followed artists
+        'user-library-read',      // Access to saved tracks
+        'playlist-modify-private', // Create and modify private playlists
+        'playlist-read-private'   // Read user's private playlists
       ];
 
       // Create authorization URL
